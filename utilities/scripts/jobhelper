@@ -1,0 +1,44 @@
+#!/bin/csh
+
+echo "`uname -n` `date`"
+
+if ($#argv > 0) then
+  cd $1
+  pwd
+endif
+
+@ hours = 72
+@ minutes = $hours * 60
+
+while ($minutes > 0)
+ @ minutes--
+ @ n=6
+ while ($n > 0)
+  @ n--
+  foreach f ( source.flag jobhelper.in jobhelper.input )
+    if (-e $f) then
+      date
+      cat $f
+      source $f
+      \rm -f $f
+    endif
+  end
+  if (-e cmd.flag) then
+    date
+    cat cmd.flag
+    set cmd = `cat cmd.flag`
+    \rm cmd.flag
+    $cmd
+  endif
+  if (-e kill.flag) then
+    date
+    echo "killall mpiexec"
+    killall srun
+    killall mpiexec
+    killall mpirun
+    \rm kill.flag
+  endif
+  sleep 10
+ end
+ echo "`date` $minutes"
+end

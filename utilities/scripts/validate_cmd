@@ -1,0 +1,69 @@
+#!/bin/csh
+
+setenv OMP_NUM_THREADS 1
+echo "HOST = $HOST"
+
+set label = "$1"
+shift
+set cmd = "$*"
+
+set date = `date +%y%m%d_%H%M`
+
+if ($?ECHO) set echo
+
+if ($?RESET) then
+  echo "WARNING: resetting $label.val"
+  cp -p $label.{log,val}
+  exit(0)
+endif
+
+if ($?tee) then
+  set cmd = "$cmd | tee $label.log"
+else
+  set cmd = "$cmd > $label.log"
+endif
+
+# echo the command
+echo "$cmd"
+if ($?dryrun) exit
+
+# run the command
+time csh -c "$cmd"
+
+# check if a .val file exists, rerun if not
+if (! -e $label.val ) then
+  echo "   WARNING: skipping test since no $label.val exists"
+  exit (0)
+endif
+
+# Compare the new log file to the existing validation file.
+# If they differ, make noise.  If it is decided that differences
+# are OK, and a "reset" (-r) option is used, then nevertheless
+# document the difference, by saving the .log and .val files,
+# for reproducibility.
+if ($?tee) then
+  diff -ibw $label.val $label.log
+  set st = $status
+else
+  diff -ibw $label.val $label.log > $label.diff
+  set st = $status
+endif
+if ($st) then
+  echo "                                                                    ==> NOT the same"
+  if ($?reset) then
+    cp -p $label{,_$date}.log
+    cp -p $label{,_$date}.val
+    echo "WARNING: resetting $label.val"
+    cp -p $label.{log,val}
+    exit(0)
+  else if ($?BITBUCKET_CLONE_DIR) then
+    echo "listing the file validate/$label.diff"
+    cat $label.diff
+  else if (! $?tee) then
+    echo "To see the diffs, list the file validate/$label.diff"
+  endif
+  exit(1)
+else
+  echo "                                                                    ==> OK, same result"
+  exit(0)
+endif

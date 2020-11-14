@@ -1,0 +1,19 @@
+# This is a sample build configuration for Other.
+# Check our guides at https://confluence.atlassian.com/x/5Q4SMw for more examples.
+# Only use spaces to indent your .yml configuration.
+# -----
+# You can specify a custom docker image from Docker Hub as your build environment.
+image: perrybothron/ubuntu-gfortran5-openmpi:16.04-5.4.0-1.10.2
+
+pipelines:
+  custom:
+    default:
+      - step:
+          script:
+            - export OMP_STACKSIZE=256m; export OMP_NUM_THREADS=1
+            - echo "Check compilation of experiments in validation-x_list.txt"
+            - cd $BITBUCKET_CLONE_DIR; utilities/scripts/validate -v -x experiments/ramses_snapshots
+            - cd $BITBUCKET_CLONE_DIR; utilities/scripts/validate -v -x experiments/turbulence
+            - echo "Check running experiments in validation_list.txt"
+            - cd $BITBUCKET_CLONE_DIR; utilities/scripts/validate -v -m experiments/turbulence
+            - echo "Everything is awesome!"

@@ -1,0 +1,191 @@
+#!/bin/csh
+
+# validate [ -d -m -r -v -x -h ] [ dir1 dir2 .. ]
+#
+# -d       : dryrun
+# -m       : skip make
+# -r       : reset (create .val files even if fails)
+# -R       : reset, with -m and -x
+# -v       : verbose output
+# -x       : skip execution
+# -l       : read validate_list.txt
+# -h       : help
+# --help   : help
+# dir1 ..  : experiment directories
+#
+# With no dirs specified, validate the current dir or all experiments/* below the current dir
+##
+
+# intial values
+set dirs = ( )
+set opt = ( )
+set patches = ( )
+
+# parse argument list
+while ($#argv > 0)
+  switch ($1)
+    case -h:
+    case --help:
+      sed -n -e '3,/##/p' `which validate` | sed -e 's/#//g'
+      exit 0
+    # dryrun
+    case -d:
+      setenv dryrun 1
+      breaksw
+    # echo
+    case -e:
+      set echo
+      setenv ECHO
+      breaksw
+    # no make
+    case -m:
+      set nomake
+      breaksw
+    # no execution
+    case -x:
+      set noexec
+      breaksw
+    # reset
+    case -r:
+      setenv reset
+      breaksw
+    case -R:
+      setenv RESET
+      breaksw
+    # tee the output
+    case -v:
+      setenv tee
+      breaksw
+    case -q:
+      echo "The -q option is now obsolete; use -v for verbose output"
+      exit 1
+    case -l:
+      shift
+      set readlist = $1
+      breaksw
+    # list of directories
+    default:
+      set dirs = ( $dirs $1 )
+  endsw
+  shift
+end
+
+if ($?RESET) then
+  unset nomake
+  unset noexec
+endif
+
+if ($#dirs == 0) then
+  if ($?readlist) then
+    # if "-f" is specified, read experiments to validate from "validate_list.txt"
+    set scriptdir = `dirname $0`
+    if ("$HOST" == "Aake-T430s") then
+      set absdir = $scriptdir
+    else
+      set absdir = `cd $scriptdir && pwd`
+    endif
+    foreach line (`cat $absdir/$readlist`)
+      set dirs = ($dirs $line)
+    end
+  else
+    # with no directories parsed, base the choice on the current directory
+    set d = $cwd:t
+    if ("$d" == "experiments") then
+      set dirs = ( `find . -mindepth 2 -maxdepth 4 -name validate -type d | sed -e 's:/validate::'` )
+    else if (-d experiments) then
+      set dirs = ( `find . -mindepth 3 -maxdepth 4 -name validate -type d | sed -e 's:/validate::'` )
+    else if (-d validate) then
+      set dirs = .
+    else
+      echo "no validation dirs found"
+      exit 1
+    endif
+  endif
+  echo dirs = $dirs
+endif
+
+# remember the initial working directory
+set wd = $cwd
+
+# loop over experiment directories
+foreach d ( $dirs )
+  if ($#dirs > 1) echo "================================== $d ================================="
+
+  # go to experiment directory and find the trailing name
+  echo "cd $d"
+  cd $d
+  set d = dispatch
+
+  # make a validate/ subdir, with *.f90 files, cd there
+  mkdir -p validate/data
+  echo "cd validate/"
+  cd validate/
+  ln -sf ../*.f90 .
+
+  # make sure we have validate_cmd in the path
+  set path = ( {,../,../../}../../../utilities/scripts $path )
+
+  # make an input.nml, if it isn't already there
+  if (! -e input.nml) then
+    if (-e ../validate.nml) then
+       cp -p ../validate.nml input.nml
+    else
+       echo "Creating validation/input.nml from input.nml"
+       grep -q do_validate ../input.nml
+       if ($status) then
+         sed -e '/io_params/s/$/ do_validate=t/' -e '/do_output/s/do_output=[tT]/do_output=f/' < ../input.nml > input.nml
+       else
+         sed -e '/do_validate/s/do_validate=[fF]/do_validate=t/' -e '/do_output/s/do_output=[tT]/do_output=f/' < ../input.nml > input.nml
+       endif
+    endif
+  endif
+
+  # make a Makefile, if it isn't already there
+  echo "Creating default $d/validation/Makefile from $d/Makefile"
+  sed -e '/TOP/s:\.\./:../../:' < ../Makefile > Makefile
+
+  # reset status counter
+  @ s = 0
+  echo "HOST = $HOST"
+  set compiler = `make compiler`
+  echo "COMPILER = $compiler"
+
+  # make command
+  if (! $?nomake) then
+    set lab = "make"
+    set cmd = "(make clean; make OPTS=validate)"
+    validate_cmd $opt $lab "$cmd"
+    @ s += $status
+  endif
+
+  # execute command
+  if (! $?noexec) then
+    foreach f (*.nml)
+      if ($f == "input.nml") then
+        set lab = "${d}_$compiler"
+        set cmd = "./$d.x"
+      else
+        set lab = "${d}_${f}_$compiler:r"
+        set cmd = "./$d.x $f"
+      endif
+      validate_cmd $opt $lab "$cmd"
+      @ s += $status
+    end
+  endif
+
+  # summary, action
+  if ($s) then
+    echo "WARNING: validation failed"
+    if (`uname -o` != "Cygwin" ) then
+      echo "Validation failed -- see $cwd/"
+    endif
+    exit 1
+  else
+    echo "validation OK"
+    make clean >& /dev/null
+    \rm -rf data
+  endif
+
+  # back to initial dir
+  cd $wd
+end
